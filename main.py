@@ -1,4 +1,5 @@
 # Imports
+import librosa
 import spleeter
 import webview
 import argparse
@@ -12,13 +13,15 @@ import io
 import shutil
 import atexit
 import uuid
+import mimetypes
+import threading
 
 # * Constants
 APPNAME = "STEMu"
 FROZEN = getattr(sys, 'frozen', False)
 DIRNAME = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 WAVEFORM_BINS = 300
-WAVEFORM_DPI = 30
+WAVEFORM_DPI = 20
 
 # Dirs
 APP_CACHE_DIR = platformdirs.user_cache_dir(APPNAME)
@@ -49,6 +52,7 @@ class JS_API():
         exit()
 
     def addFile(self, in_file, *args):
+        # TODO: Threads or multiprocessing
         # Debug prints
         print("Received file:", in_file["filename"] + ", size:", len(in_file["data"]), "bytes")
         print(in_file["data"][:30])
@@ -67,15 +71,23 @@ class JS_API():
         # Save original file
         with open(file_path, "wb") as f:
             f.write(data)
+
+        # Get mimetype
+        mimetype, _ = mimetypes.guess_type(file_path)
         
         # Render waveform
-        render_waveform.render_waveform(file_path, waveform_path, WAVEFORM_BINS, WAVEFORM_DPI)
+        waveform_data = io.BytesIO()
+        render_waveform.render_waveform(file_path, waveform_data, WAVEFORM_BINS, WAVEFORM_DPI)
+        with open(waveform_path, "wb") as f:
+            f.write(waveform_data.getbuffer())
 
         # Result object
         result = {
             "filename": in_file["filename"],
             "file_path": file_path,
-            "waveform_path": waveform_path
+            "file_data": "data:" + mimetype + ";base64," + base64.b64encode(data).decode('utf-8'),
+            "waveform_path": waveform_path,
+            "waveform_data": "data:image/png;base64," + base64.b64encode(waveform_data.getvalue()).decode('utf-8')
         }
 
         return result
@@ -85,11 +97,12 @@ window = webview.create_window(
     title="STEMu",
     url=f"http://localhost:{args.port}" if args.dev else os.path.join(DIRNAME, 'frontend', 'dist', 'index.html'),
     width=400,
-    height=550,
+    height=625,
     resizable=False,
     frameless=True,
     easy_drag=False,
-    js_api=JS_API()
+    js_api=JS_API(),
+    confirm_close=True
 )
 
 def cleanup():

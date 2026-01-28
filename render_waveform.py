@@ -4,7 +4,7 @@ from scipy.signal import butter, lfilter
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-def render_waveform(audio, output, bins=100, dpi=60, low_color="#004E98", mid_color="#FBB13C", high_color="#EF2D56"):
+def render_waveform(audio, output, bins=100, dpi=60, low_color="#1f71db", mid_color="#b26403", high_color="#f5ead6"):
     # 1. Load Audio
     y, sr = librosa.load(audio, sr=None)
     
