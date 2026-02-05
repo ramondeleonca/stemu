@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Pause, Play, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, Pause, Play, X } from "lucide-react";
 import { FilePond } from "react-filepond";
 import { useHoverDirty, useLocalStorage, useMouseHovered } from "react-use";
 import { AnimatePresence, motion } from "motion/react";
@@ -10,6 +10,7 @@ import { FilePondErrorDescription, FilePondFile } from "filepond";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger } from "./components/ui/select";
 import { SelectValue } from "@radix-ui/react-select";
 import useAudioFile from "./hooks/useAudioFile";
+import { Separator } from "@/components/ui/separator";
 
 const waveformImages = Array(36).fill(null).map((_, i) => `/waveforms/${i}.png`);
 
@@ -48,7 +49,7 @@ class FileWrapper {
   }
 }
 
-function FilePreview({ file }: { file: FileWrapper }) {
+function FilePreview({ file, availableModels }: { file: FileWrapper, availableModels: {[k in SpleeterModel]: boolean} }) {
   const [fakeWaveformPerc, setFakeWaveformPerc] = useState(0);
   const waveformContainerRef = useRef<HTMLDivElement>(null);
 
@@ -83,14 +84,23 @@ function FilePreview({ file }: { file: FileWrapper }) {
 
   const { audio, controls, state } = useAudioFile(file.file.file as File);
 
+  const fadeInTime = 0.5;
+  const fadeInSamples = 10;
+  const finalVolume = 0.15;
   const playAt = () => {
     if (!waveformContainerRef.current) return;
     const rect = waveformContainerRef.current.getBoundingClientRect();
     const clickX = elX;
     const perc = clickX / rect.width;
     const time = perc * state.duration;
-    controls.play();
+    controls.volume(0);
     controls.seek(time);
+    controls.play();
+    for (let i = 0; i < fadeInSamples; i++) {
+      setTimeout(() => {
+        controls.volume(((i + 1) / fadeInSamples) * finalVolume);
+      }, (i * (fadeInTime * 1000 / fadeInSamples)));
+    }
   }
 
   return (
@@ -123,12 +133,11 @@ function FilePreview({ file }: { file: FileWrapper }) {
             <motion.img
               // Real waveform
               key="real"
-              // TODO: Fix stretching
               className="w-full h-full absolute top-0 left-0"
               src={file.processed?.waveform_data}
               alt={file.file.filename + " waveform"}
-              initial={{ opacity: 0, scale: 0.5 }}
-              animate={{ opacity: 1, scale: 1 }}
+              initial={{ opacity: 0, scaleY: 0.5, scaleX: 0.5 }}
+              animate={{ opacity: 1, scaleY: 1, scaleX: 1.1 }} // Slightly wider
               transition={{ duration: 0.05, delay: 0.25, type:"spring", stiffness: 50, damping: 10 }}
             ></motion.img>
           ) : (
@@ -171,7 +180,7 @@ function FilePreview({ file }: { file: FileWrapper }) {
           <SelectGroup>
             <SelectLabel>STEM model</SelectLabel>
             {Object.keys(SpleeterModels).map((model: SpleeterModel) => (
-              <SelectItem key={model} value={model}>{SpleeterModels[model].displayName} <span className="opacity-75 text-xs">({SpleeterModels[model].description})</span></SelectItem>
+              <SelectItem disabled={!availableModels[model]} key={model} value={model}>{SpleeterModels[model].displayName} <span className="opacity-75 text-xs">({SpleeterModels[model].description})</span></SelectItem>
             ))}
           </SelectGroup>
         </SelectContent>
@@ -198,8 +207,49 @@ export default function App() {
     console.log("Pywebview object:", pywebview);
   }, [pywebview]);
 
+  const [modelDownloadProgress, setModelDownloadProgress] = useState<{[k in SpleeterModel]?: number}>({});
+  window["setModelDownloadProgress"] = (model: SpleeterModel, progress: number) => {
+    console.log(`Model ${model} download progress: ${progress}%`);
+    setModelDownloadProgress(prev => ({
+      ...prev,
+      [model]: progress
+    }));
+  }
+  useEffect(() => {
+    console.log("Model download progress:", modelDownloadProgress);
+  }, [modelDownloadProgress]);
+
   // Status from pywebview
   const [status, setStatus] = useState<string | null>(null);
+  const [statusLevel, setStatusLevel] = useState<"info" | "warning" | "error">("info");
+
+  // STEM models available
+  const [availableModels, setAvailableModels] = useState<{[k in SpleeterModel]: boolean} | null>();
+  const checkModels = useCallback(() => {
+    if (!pywebview) return;
+    window.pywebview.api.checkModels<{[k in SpleeterModel]: boolean}>().then(models => {
+      setAvailableModels(models);
+      console.log("Available models:", models);
+
+      // Set status
+      let allModelsAvailable = true;
+      for (const model in SpleeterModels) {
+        if (!models[model as SpleeterModel]) {
+          allModelsAvailable = false;
+          break;
+        }
+      }
+      if (allModelsAvailable) {
+        setStatus("All STEM models are available.");
+        setStatusLevel("info");
+      } else {
+        setStatus("Limited STEM models available.");
+        setStatusLevel("warning");
+      }
+    });
+  }, [pywebview]);
+  window["checkModels"] = () => checkModels();
+  useEffect(checkModels, [checkModels, pywebview]);
 
   // Fist use flag
   const [firstUse, setFirstUse] = useLocalStorage("stemu-first-use", true);
@@ -277,7 +327,7 @@ export default function App() {
                 <AnimatePresence mode="wait">
                   <motion.p 
                     key={status}
-                    className='text-sm leading-0 mt-1'
+                    className={`text-sm leading-0 mt-1 ${statusLevel === "info" ? "text-white" : statusLevel === "warning" ? "text-yellow-500 font-semibold" : "text-red-500 font-semibold"}`}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
@@ -328,6 +378,56 @@ export default function App() {
       {/* Step screens */}
       <Tabs value={step} className="w-full h-full">
         <TabsContents className="w-full h-full! relative">
+          <TabsContent value="stem-models" className="w-full h-full">
+            <div className="w-full h-full flex items-center justify-start flex-col gap-4 p-6 pt-8">
+              <div className="w-full">
+                <Button
+                  disabled={availableModels && Object.values(availableModels).reduce((prev, curr) => prev && curr)}
+                  // TODO: onclick and disabled when downloading already
+                >Download All</Button>
+              </div>
+              {availableModels ? Object.keys(SpleeterModels).map((model, i, arr) => (
+                <Fragment key={model}>
+                  <div className="w-full flex justify-between">
+                    <div>
+                      <h2 className={`font-semibold mb-1 duration-300 transition-all ${!availableModels[model] ? "text-red-500 opacity-75" : ""}`}>{SpleeterModels[model as SpleeterModel].displayName} {!availableModels[model] ? "(not available)" : ""}</h2>
+                      <p className="text-sm opacity-75">{SpleeterModels[model as SpleeterModel].description}</p>
+                    </div>
+
+                    <div>
+                      <Button 
+                        size="sm"
+                        variant="secondary"
+                        className="relative overflow-clip"
+                        disabled={(!!modelDownloadProgress[model as SpleeterModel] || availableModels[model as SpleeterModel])}
+                        onClick={() => window.pywebview.api.downloadModel(model as SpleeterModel)}
+                      >
+                        <motion.div
+                          className="progress absolute z-20 bg-white opacity-50 top-0 left-0 bottom-0 origin-left w-full"
+                          initial={{ scaleX: 0 }}
+                          animate={{ scaleX: modelDownloadProgress[model as SpleeterModel] ? modelDownloadProgress[model as SpleeterModel] : 0 }}
+                        ></motion.div>
+                        {
+                          modelDownloadProgress[model as SpleeterModel] < 1 ? 
+                            `Downloading...` :
+                            availableModels[model as SpleeterModel] ? 
+                            "Downloaded" : 
+                            "Download"
+                        }
+                      </Button>
+                    </div>
+                  </div>
+
+                  {i < arr.length - 1 ? <Separator /> : null}
+                </Fragment>
+              )) : null}
+            </div>
+
+            <div className="w-full flex justify-end p-6 absolute bottom-0 right-0">
+              <Button onClick={() => setStep("file-select")}>File select <ArrowRight></ArrowRight></Button>
+            </div>
+          </TabsContent>
+
           {/* File Select */}
           <TabsContent value="file-select" className="w-full h-full">
             <div className="w-full h-full flex items-center justify-center">
@@ -347,23 +447,25 @@ export default function App() {
               </div>
             </div>
 
-            <div className="w-full flex justify-end p-6 absolute bottom-0 right-0">
-              <Button disabled={files.length === 0} onClick={() => setStep("settings")}>Next</Button>
+            <div className="w-full flex justify-between p-6 absolute bottom-0 right-0">
+              <Button variant="outline" onClick={() => setStep("stem-models")}><ArrowLeft></ArrowLeft> STEM models</Button>
+              <Button disabled={files.length === 0} onClick={() => setStep("settings")}>Next <ArrowRight></ArrowRight></Button>
             </div>
           </TabsContent>
 
           {/* Settings */}
           <TabsContent value="settings" className="w-full h-full relative">
             <div className="w-full h-full overflow-hidden flex flex-col gap-2 p-4">
-              {files.map(file => <FilePreview key={file.file.filename} file={file}></FilePreview>)}
+              {files.map(file => <FilePreview key={file.file.filename} file={file} availableModels={availableModels}></FilePreview>)}
             </div>
 
             <div className="w-full flex justify-between p-6 absolute bottom-0 right-0">
-              <Button onClick={() => setStep("file-select")} variant="outline">Back</Button>
-              <Button onClick={() => setStep("separate")}>Next</Button>
+              <Button onClick={() => setStep("file-select")} variant="outline"><ArrowLeft></ArrowLeft> Back</Button>
+              <Button onClick={() => setStep("separate")}>Next <ArrowRight></ArrowRight></Button>
             </div>
           </TabsContent>
 
+          {/* TODO */}
           <TabsContent value="separate" className="w-full h-full">
             <div className="w-full h-full flex items-center justify-center">
               <p>Separation in progress...</p>
