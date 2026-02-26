@@ -291,4 +291,4 @@ window = webview.create_window(
 )
 
 if __name__ == "__main__":
-    webview.start(debug=args.dev or args.debug, http_server=True, private_mode=False)
+    webview.start(debug=args.dev or args.debug, http_server=True)
