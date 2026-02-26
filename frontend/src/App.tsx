@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Pause, Play, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Folder, Pause, Play, X, Triangle, Loader } from "lucide-react";
 import { FilePond } from "react-filepond";
 import { useHoverDirty, useLocalStorage, useMouseHovered } from "react-use";
 import { AnimatePresence, motion } from "motion/react";
@@ -11,6 +11,12 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { SelectValue } from "@radix-ui/react-select";
 import useAudioFile from "./hooks/useAudioFile";
 import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
+import { Checkbox } from "./components/ui/checkbox";
+import { Label } from "./components/ui/label";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
+import { Ring } from 'ldrs/react'
+import 'ldrs/react/Ring.css'
 
 const waveformImages = Array(36).fill(null).map((_, i) => `/waveforms/${i}.png`);
 
@@ -56,9 +62,9 @@ function FilePreview({ file, availableModels }: { file: FileWrapper, availableMo
   const { elX } = useMouseHovered(waveformContainerRef, { bound: true, whenHovered: true });
   const waveformHovered = useHoverDirty(waveformContainerRef);
 
-  useEffect(() => {
-    console.log("Mouse X in waveform container: ", elX);
-  }, [elX])
+  // useEffect(() => {
+  //   console.log("Mouse X in waveform container: ", elX);
+  // }, [elX])
  
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -127,7 +133,7 @@ function FilePreview({ file, availableModels }: { file: FileWrapper, availableMo
 
         <p className="text-xs opacity-75">{Math.floor(state.duration/60)}:{Math.floor(state.duration % 60).toString().padStart(2, "0")}</p>
       </div>
-      <div ref={waveformContainerRef} className="waveform relative w-full h-7" onClick={playAt}>
+      <div ref={waveformContainerRef} className="waveform relative w-full h-9" onClick={playAt}>
         <AnimatePresence>
           {file.processed ? (
             <motion.img
@@ -172,7 +178,7 @@ function FilePreview({ file, availableModels }: { file: FileWrapper, availableMo
           }}
         ></motion.div>
       </div>
-      <Select defaultValue={file.model} onValueChange={value => {file.model = value as SpleeterModel; console.log(file.model)}} disabled={!file.processed}>
+      <Select defaultValue={Object.keys(SpleeterModels).filter(model => availableModels[model])[0]} onValueChange={value => {file.model = value as SpleeterModel; console.log(file.model)}} disabled={!file.processed}>
         <SelectTrigger size="sm" className="p-1 z-50">
           <SelectValue placeholder="STEM model"></SelectValue>
         </SelectTrigger>
@@ -180,7 +186,16 @@ function FilePreview({ file, availableModels }: { file: FileWrapper, availableMo
           <SelectGroup>
             <SelectLabel>STEM model</SelectLabel>
             {Object.keys(SpleeterModels).map((model: SpleeterModel) => (
-              <SelectItem disabled={!availableModels[model]} key={model} value={model}>{SpleeterModels[model].displayName} <span className="opacity-75 text-xs">({SpleeterModels[model].description})</span></SelectItem>
+              <Tooltip key={model}>
+                <TooltipTrigger>
+                  <SelectItem disabled={!availableModels[model]} value={model}>{SpleeterModels[model].displayName} <span className="opacity-75 text-xs">({SpleeterModels[model].description})</span></SelectItem>
+                </TooltipTrigger>
+                {!availableModels[model] ? (
+                  <TooltipContent>
+                    Download model in STEM models tab
+                  </TooltipContent>
+                ) : null}
+              </Tooltip>
             ))}
           </SelectGroup>
         </SelectContent>
@@ -219,7 +234,26 @@ export default function App() {
     console.log("Model download progress:", modelDownloadProgress);
   }, [modelDownloadProgress]);
 
+  const [outputPath, setOutputPath] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pywebview) return;
+    window.pywebview.api.getOutputDirectory().then((path: string) => {
+      setOutputPath(path);
+      console.log("Current output path:", path);
+    })
+  }, [pywebview]);
+  const chooseOutputPath = () => {
+    if (!pywebview) return;
+    window.pywebview.api.chooseOutputDirectory().then((path: string) => {
+      setOutputPath(path);
+      console.log("Chosen output path:", path);
+    });
+  };
+
+  const [individualFolders, setIndividualFolders] = useState(true);
+
   // Status from pywebview
+  // TODO: always update status level
   const [status, setStatus] = useState<string | null>(null);
   const [statusLevel, setStatusLevel] = useState<"info" | "warning" | "error">("info");
 
@@ -268,7 +302,6 @@ export default function App() {
 
   // TODO: Consider using useReducer
   const addFile = (_err: FilePondErrorDescription | null, file: FilePondFile) => {
-    
     setFiles(prev => {
       console.log("Attempting to add file:", files.length);
       if (files.length > maxFiles) {
@@ -283,29 +316,29 @@ export default function App() {
       console.log("Pywebview ready:", !!pywebview);
 
       // TODO: STILL SENDS OVERFLOWN FILES WHEN ADDED QUICKLY 😭
-    if (newArr.includes(wrapper)) {
-      setStatus(`Processing files...`);
-      console.log("Sending file to Python:", file.filename, file.id);
-      toBase64(file.file as File).then(data => {
-        window.pywebview.api.addFile<FileProcessResult>({
-          filename: file.filename,
-          id: file.id,
-          data
-        }).then(res => {
-          // Update the processed file in state
-          setFiles(prev => prev.map(f => {
-            if (f === wrapper) return new FileWrapper(f.file, res);
-            return f;
-          }));
-          setStatus(`File processed successfully.`);
-          console.log("File processed successfully");
-          return res;
-        }).then(console.log);
-      }).then(() => {
-        console.log("File sent to Python successfully.");
-        
-      });
-    }
+      if (newArr.includes(wrapper)) {
+        setStatus(`Processing files...`);
+        console.log("Sending file to Python:", file.filename, file.id);
+        toBase64(file.file as File).then(data => {
+          window.pywebview.api.addFile<FileProcessResult>({
+            filename: file.filename,
+            id: file.id,
+            data
+          }).then(res => {
+            // Update the processed file in state
+            setFiles(prev => prev.map(f => {
+              if (f === wrapper) return new FileWrapper(f.file, res);
+              return f;
+            }));
+            setStatus(`File processed successfully.`);
+            console.log("File processed successfully");
+            return res;
+          }).then(console.log);
+        }).then(() => {
+          console.log("File sent to Python successfully.");
+          
+        });
+      }
 
       return newArr;
     });
@@ -313,8 +346,28 @@ export default function App() {
 
   const removeFile = (_err: FilePondErrorDescription | null, file: FilePondFile) => {
     setFiles(prev => prev.filter(f => f.file.file !== file.file));
+    window.pywebview.api.removeFile(file.filename).then(() => {
+      setStatus(`File removed: ${file.filename}`);
+      console.log("File removed successfully:", file.filename);
+    });
     console.log("Removing file:", file.filename);
     console.log(files);
+  }
+
+  const [separationProgress, setSeparationProgress] = useState<{[filename: string]: number}>({});
+  window["setSeparationProgress"] = setSeparationProgress;
+  const startSeparation = () => {
+    if (!pywebview) return;
+    setStatus("Starting separation...");
+    window.pywebview.api.startSeparation(
+      files.map(f => ({
+        filename: f.file.filename,
+        model: f.model
+      }))
+    ).then(() => {
+      setStatus("Separation completed.");
+      console.log("Separation completed.");
+    });
   }
 
   return (
@@ -382,7 +435,11 @@ export default function App() {
             <div className="w-full h-full flex items-center justify-start flex-col gap-4 p-6 pt-8">
               <div className="w-full">
                 <Button
-                  disabled={availableModels && Object.values(availableModels).reduce((prev, curr) => prev && curr)}
+                  variant="outline"
+                  disabled={
+                    (availableModels && Object.values(availableModels).reduce((prev, curr) => prev && curr)) ||  // Disabled if all models downloaded
+                    Object.values(modelDownloadProgress).some(progress => progress < 1) // Disabled if any model is currently downloading
+                  }
                   // TODO: onclick and disabled when downloading already
                 >Download All</Button>
               </div>
@@ -395,26 +452,30 @@ export default function App() {
                     </div>
 
                     <div>
-                      <Button 
-                        size="sm"
-                        variant="secondary"
-                        className="relative overflow-clip"
-                        disabled={(!!modelDownloadProgress[model as SpleeterModel] || availableModels[model as SpleeterModel])}
-                        onClick={() => window.pywebview.api.downloadModel(model as SpleeterModel)}
-                      >
+                      <div className="relative rounded-md overflow-clip">
                         <motion.div
+                          key="progress-bar"
                           className="progress absolute z-20 bg-white opacity-50 top-0 left-0 bottom-0 origin-left w-full"
                           initial={{ scaleX: 0 }}
-                          animate={{ scaleX: modelDownloadProgress[model as SpleeterModel] ? modelDownloadProgress[model as SpleeterModel] : 0 }}
+                          animate={{ scaleX: (modelDownloadProgress[model as SpleeterModel] ?? 0) < 1 ? modelDownloadProgress[model as SpleeterModel] : 0 }}
                         ></motion.div>
-                        {
-                          modelDownloadProgress[model as SpleeterModel] < 1 ? 
-                            `Downloading...` :
-                            availableModels[model as SpleeterModel] ? 
-                            "Downloaded" : 
-                            "Download"
-                        }
-                      </Button>
+                        <Button
+                          key="download-button"
+                          size="sm"
+                          variant="default"
+                          className="relative overflow-clip"
+                          disabled={(!!modelDownloadProgress[model as SpleeterModel] || availableModels[model as SpleeterModel])}
+                          onClick={() => window.pywebview.api.downloadModel(model as SpleeterModel)}
+                        >
+                          {
+                            modelDownloadProgress[model as SpleeterModel] < 1 ? 
+                              `Downloading...` :
+                              availableModels[model as SpleeterModel] ? 
+                              "Downloaded" : 
+                              "Download"
+                          }
+                        </Button>
+                      </div>
                     </div>
                   </div>
 
@@ -423,7 +484,8 @@ export default function App() {
               )) : null}
             </div>
 
-            <div className="w-full flex justify-end p-6 absolute bottom-0 right-0">
+            <div className="w-full flex justify-between p-6 absolute bottom-0 right-0">
+              <Button variant="outline" onClick={checkModels}>Check models</Button>
               <Button onClick={() => setStep("file-select")}>File select <ArrowRight></ArrowRight></Button>
             </div>
           </TabsContent>
@@ -465,14 +527,45 @@ export default function App() {
             </div>
           </TabsContent>
 
-          {/* TODO */}
+          {/* Separation screen */}
           <TabsContent value="separate" className="w-full h-full">
-            <div className="w-full h-full flex items-center justify-center">
-              <p>Separation in progress...</p>
+            <div className="w-full h-full flex flex-col items-center justify-start p-6 gap-2">
+              <div className="flex items-center justify-center flex-col gap-1">
+                <p className="opacity-75 text-center text-xs">Saving in: {outputPath?.split(/\/|\\/)?.pop()}</p>
+                <Button onClick={chooseOutputPath} size="sm">Output folder <Folder></Folder></Button>
+                <Label>
+                  <Checkbox defaultChecked checked={individualFolders} onCheckedChange={val => setIndividualFolders(!!val)}></Checkbox>
+                  <span className="text-xs opacity-75">Individual folders</span>
+                </Label>
+              </div>
+
+              {files.map((file, i, arr) => (
+                <Fragment key={file.file.filename}>
+                  <div className="w-full flex items-center justify-between">
+                    <p className="text-sm flex flex-wrap">{file.file.filenameWithoutExtension}</p>
+                    <div className="text-sm opacity-75 ml-2 flex items-center gap-2">
+                      <div className="flex flex-col items-center justify-center">
+                        <p>{SpleeterModels[file.model as SpleeterModel].displayName}</p>
+                        <p>Waiting...</p>
+                      </div>
+                      {/*  */}
+                      {/* <Ring
+                        size="16"
+                        stroke="2"
+                        bgOpacity="0"
+                        speed="2"
+                        color="white" 
+                      /> */}
+                    </div>
+                  </div>
+                  {i < arr.length - 1 ? <Separator /> : null}
+                </Fragment>
+              ))}
             </div>
+            
             <div className="w-full flex justify-between p-6 absolute bottom-0 right-0">
               <Button onClick={() => setStep("settings")} variant="outline">Back</Button>
-              <Button disabled>Start Separation</Button>
+              <Button onClick={startSeparation}>Start Separation</Button>
             </div>
           </TabsContent>
         </TabsContents>
