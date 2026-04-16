@@ -79,7 +79,8 @@ model_provider = GithubModelProvider(
 spleeter_resources_root_path = os.path.join(os.path.dirname(os.path.abspath(spleeter.__file__)), "resources")
 
 spleeter_2stems_model_config_path = os.path.join(spleeter_resources_root_path, "2stems.json")
-stemu_2stems_model = os.path.join(MODELS_DIR, "2stems", "5stems.json")
+stemu_2stems_model = os.path.join(MODELS_DIR, "2stems", "2stems.json")
+os.makedirs(os.path.join(MODELS_DIR, "2stems"), exist_ok=True)
 with open(spleeter_2stems_model_config_path, "r") as f:
     m_json = json.load(f)
     m_json["model_dir"] = os.path.join(MODELS_DIR, "2stems")
@@ -87,7 +88,8 @@ with open(spleeter_2stems_model_config_path, "r") as f:
         f.write(json.dumps(m_json))
 
 spleeter_4stems_model_config_path = os.path.join(spleeter_resources_root_path, "4stems.json")
-stemu_4stems_model = os.path.join(MODELS_DIR, "4stems", "5stems.json")
+stemu_4stems_model = os.path.join(MODELS_DIR, "4stems", "4stems.json")
+os.makedirs(os.path.join(MODELS_DIR, "4stems"), exist_ok=True)
 with open(spleeter_4stems_model_config_path, "r") as f:
     m_json = json.load(f)
     m_json["model_dir"] = os.path.join(MODELS_DIR, "4stems")
@@ -96,6 +98,7 @@ with open(spleeter_4stems_model_config_path, "r") as f:
 
 spleeter_5stems_model_config_path = os.path.join(spleeter_resources_root_path, "5stems.json")
 stemu_5stems_model = os.path.join(MODELS_DIR, "5stems", "5stems.json")
+os.makedirs(os.path.join(MODELS_DIR, "5stems"), exist_ok=True)
 with open(spleeter_5stems_model_config_path, "r") as f:
     m_json = json.load(f)
     m_json["model_dir"] = os.path.join(MODELS_DIR, "5stems")
@@ -105,6 +108,7 @@ with open(spleeter_5stems_model_config_path, "r") as f:
 # Import spleeter after
 import spleeter
 import spleeter.separator
+use_multiprocessing = False
 
 # Create separators for each model with multiprocessing enabled
 # TODO: WTF THIS CONSUMES SO MUCH RAM, HOW TF DO WE OPTIMIZE THIS? maybe we can create the separator on demand and then cache it for future use?
@@ -122,8 +126,7 @@ argparser = argparse.ArgumentParser(
 argparser.add_argument("--dev", action="store_true", help="Run in development mode")
 argparser.add_argument("--port", type=int, default="5678", help="Port for development server (requires --dev)")
 argparser.add_argument("--debug", action="store_true", help="Enable debug mode (shows webview inspector)")
-
-args = argparser.parse_args()
+args: argparse.Namespace
 
 session_processed_files = [] # List of ALL processed files in current session
 session_current_file_descriptors = [] # List of processed files currently selected in the session
@@ -150,7 +153,7 @@ class JS_API():
         models = {}
         for model in spleeter_models:
             model_path = os.path.join(MODELS_DIR, model)
-            models[model] = os.path.exists(model_path)
+            models[model] = os.path.exists(os.path.join(model_path, "model.meta"))
         return models
     
     def downloadModel(self, model: SpleeterModel, *args):
@@ -244,7 +247,7 @@ class JS_API():
         if len(model_2stems_files) > 0:
             print("Separating 2stems files:", [fd["filename"] for fd in model_2stems_files])
             print("Loading 2stems model")
-            separator_2stems = spleeter.separator.Separator(stemu_2stems_model, multiprocess=True)
+            separator_2stems = spleeter.separator.Separator(stemu_2stems_model, multiprocess=use_multiprocessing)
             for fd in model_2stems_files:
                 print("Separating file:", fd["filename"])
                 separator_2stems.separate_to_file(os.path.join(SESSION_CACHE_DIR, fd["filename"]), output_path, synchronous=False)
@@ -256,7 +259,7 @@ class JS_API():
         if len(model_4stems_files) > 0:
             print("Separating 4stems files:", [fd["filename"] for fd in model_4stems_files])
             print("Loading 4stems model")
-            separator_4stems = spleeter.separator.Separator(stemu_4stems_model, multiprocess=True)
+            separator_4stems = spleeter.separator.Separator(stemu_4stems_model, multiprocess=use_multiprocessing)
             for fd in model_4stems_files:
                 print("Separating file:", fd["filename"])
                 separator_4stems.separate_to_file(os.path.join(SESSION_CACHE_DIR, fd["filename"]), output_path, synchronous=False)
@@ -268,7 +271,7 @@ class JS_API():
         if len(model_5stems_files) > 0:
             print("Separating 5stems files:", [fd["filename"] for fd in model_5stems_files])
             print("Loading 5stems model")
-            separator_5stems = spleeter.separator.Separator(stemu_5stems_model, multiprocess=True)
+            separator_5stems = spleeter.separator.Separator(stemu_5stems_model, multiprocess=use_multiprocessing)
             for fd in model_5stems_files:
                 print("Separating file:", fd["filename"])
                 separator_5stems.separate_to_file(os.path.join(SESSION_CACHE_DIR, fd["filename"]), output_path, synchronous=False)
@@ -278,17 +281,28 @@ class JS_API():
             del separator_5stems
 
 # * Create window
-window = webview.create_window(
-    title="STEMu",
-    url=f"http://localhost:{args.port}" if args.dev else os.path.join(DIRNAME, 'frontend', 'dist', 'index.html'),
-    width=400,
-    height=625,
-    resizable=False,
-    frameless=True,
-    easy_drag=False,
-    js_api=JS_API(),
-    confirm_close=True
-)
+window: webview.Window = None
+
+def main():
+    # Parse arguments
+    global args
+    args = argparser.parse_args()
+
+    # * Create window
+    webview.create_window(
+        title="STEMu",
+        url=f"http://localhost:{args.port}" if args.dev else os.path.join(DIRNAME, 'frontend', 'dist', 'index.html'),
+        width=400,
+        height=625,
+        resizable=False,
+        frameless=True,
+        easy_drag=False,
+        js_api=JS_API(),
+        confirm_close=True
+    )
+
+    # * Start webview
+    webview.start(debug=args.dev or args.debug, http_server=True)
 
 if __name__ == "__main__":
-    webview.start(debug=args.dev or args.debug, http_server=True)
+    main()
