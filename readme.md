@@ -30,3 +30,27 @@ Select the STEM model you wanna use for each audio file in the next tab
 ![1774276764078](image/readme/1774276764078.png)
 
 After a while your audio files will be in the folder you chose or in music/STEMu Output
+
+## FFmpeg Installation Guide
+
+To use this project, you need to have FFmpeg installed on your system. FFmpeg is a powerful multimedia framework that can decode, encode, transcode, and stream audio and video files.
+
+### Installing FFmpeg on Windows using Winget
+
+1. Open a terminal (PowerShell or Command Prompt).
+2. Run the following command to install FFmpeg using Winget:
+
+   ```powershell
+   winget install -e --id Gyan.FFmpeg
+   ```
+
+3. Verify the installation by running:
+
+   ```powershell
+   ffmpeg -version
+   ```
+
+   If FFmpeg is installed correctly, this command will display the installed version of FFmpeg.
+
+For more information about FFmpeg, visit the [official FFmpeg website](https://ffmpeg.org/).
+

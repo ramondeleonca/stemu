@@ -289,7 +289,8 @@ def main():
     args = argparser.parse_args()
 
     # * Create window
-    webview.create_window(
+    global window
+    window = webview.create_window(
         title="STEMu",
         url=f"http://localhost:{args.port}" if args.dev else os.path.join(DIRNAME, 'frontend', 'dist', 'index.html'),
         width=400,
@@ -302,7 +303,11 @@ def main():
     )
 
     # * Start webview
-    webview.start(debug=args.dev or args.debug, http_server=True)
+    webview.start(gui="edgechromium", debug=args.dev or args.debug, http_server=True)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("An error occurred:", str(e))
+        input("Press Enter to exit...")
